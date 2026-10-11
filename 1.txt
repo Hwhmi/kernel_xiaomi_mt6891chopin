@@ -1,0 +1,10 @@
+ksu: align manual hooks with BakaSU official guide
+
+- add ksu_handle_newfstat_ret and ksu_handle_fstat64_ret in fs/stat.c
+  (required by BakaSU manual_hook_check)
+- switch all hook config macros from CONFIG_KSU_SUSFS to
+  CONFIG_KSU_MANUAL_HOOK per official guide
+- fix sys_read hook: add ksu_init_rc_hook guard with unlikely(),
+  add __attribute__((cold)) per official spec
+
+Fixes: You lost ksu_handle_newfstat_ret hook in your kernel
