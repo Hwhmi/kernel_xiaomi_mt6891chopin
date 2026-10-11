@@ -1,0 +1,30 @@
+#!/bin/bash
+# prepare-commit-msg hook: 自动生成提交信息模板
+# 放到 .git/hooks/prepare-commit-msg，chmod +x
+# 每次 git commit 会自动填入改动文件列表和统计
+
+# 只在普通 commit 时触发（跳过 merge、amend、squash）
+if [ "$2" = "merge" ] || [ "$2" = "commit" ]; then
+    exit 0
+fi
+
+# 获取暂存区改动
+FILES=$(git diff --cached --name-only)
+STATS=$(git diff --cached --stat | tail -1)
+
+if [ -z "$FILES" ]; then
+    exit 0
+fi
+
+# 生成文件列表（带缩进）
+FILE_LIST=$(echo "$FILES" | sed 's/^/  - /')
+
+# 写入提交信息
+cat > "$1" <<EOF
+<简述改动>
+
+改动文件:
+${FILE_LIST}
+
+${STATS}
+EOF

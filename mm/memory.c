@@ -85,6 +85,14 @@
 #include <linux/susfs_def.h>
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#include <linux/susfs_def.h>
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#include <linux/susfs_def.h>
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+
 #include "internal.h"
 
 #ifdef CONFIG_SPECULATIVE_PAGE_FAULT
