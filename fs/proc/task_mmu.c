@@ -347,21 +347,6 @@ static void show_vma_header_prefix(struct seq_file *m,
 		   MAJOR(dev), MINOR(dev), ino);
 }
 
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-extern struct srcu_struct susfs_srcu_open_redirect;
-extern int susfs_open_redirect_spoof_show_map_vma_srcu(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char **out_spoofed_name);
-#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-extern struct srcu_struct susfs_srcu_open_redirect;
-extern int susfs_open_redirect_spoof_show_map_vma_srcu(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char **out_spoofed_name);
-#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);
@@ -880,6 +865,11 @@ static void __show_smap(struct seq_file *m, const struct mem_size_stats *mss)
 	seq_printf(m,
 		   "Rss:            %8lu kB\n"
 		   "Pss:            %8lu kB\n"
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+	if (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+		return 0;
+#endif
+
 		   "Shared_Clean:   %8lu kB\n"
 		   "Shared_Dirty:   %8lu kB\n"
 		   "Private_Clean:  %8lu kB\n"
@@ -942,7 +932,6 @@ static int show_smap(struct seq_file *m, void *v)
 	show_smap_vma_flags(m, vma);
 
 	m_cache_vma(m, vma);
-
 	return 0;
 }
 
@@ -981,6 +970,7 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 		if (rwsem_is_contended(&mm->mmap_sem)) {
 			up_read(&mm->mmap_sem);
 			down_read(&mm->mmap_sem);
+
 
 			/*
 			 * After dropping the lock, there are three cases to

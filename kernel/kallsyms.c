@@ -617,6 +617,7 @@ static int s_show(struct seq_file *m, void *p)
 			   type, iter->name, iter->module_name);
 	} else
 
+
 #ifndef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
 		seq_printf(m, "%pK %c %s\n", (void *)iter->value,
 			   iter->type, iter->name);

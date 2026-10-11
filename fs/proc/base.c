@@ -772,7 +772,6 @@ static int proc_pid_permission(struct inode *inode, int mask)
 }
 
 
-
 static const struct inode_operations proc_def_inode_operations = {
 	.setattr	= proc_setattr,
 };
@@ -1673,13 +1672,6 @@ out:
 	return ERR_PTR(error);
 }
 
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-extern int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
-#endif
-
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-extern int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
-#endif
 
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 extern int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
@@ -1694,27 +1686,6 @@ static int do_proc_readlink(struct path *path, char __user *buffer, int buflen)
 	if (!tmp)
 		return -ENOMEM;
 
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-	if (SUSFS_IS_INODE_OPEN_REDIRECT(path->dentry->d_inode)) {
-		if (!susfs_open_redirect_spoof_do_proc_readlink(path->dentry->d_inode, tmp, buflen)) {
-			len = strlen(tmp);
-			if (copy_to_user(buffer, tmp, len))
-				len = -EFAULT;
-			goto out;
-		}
-	}
-#endif
-
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-	if (SUSFS_IS_INODE_OPEN_REDIRECT(path->dentry->d_inode)) {
-		if (!susfs_open_redirect_spoof_do_proc_readlink(path->dentry->d_inode, tmp, buflen)) {
-			len = strlen(tmp);
-			if (copy_to_user(buffer, tmp, len))
-				len = -EFAULT;
-			goto out;
-		}
-	}
-#endif
 
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 	if (SUSFS_IS_INODE_OPEN_REDIRECT(path->dentry->d_inode)) {

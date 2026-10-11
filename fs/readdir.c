@@ -221,6 +221,7 @@ orig_flow:
 	if (!path_err)
 		path_put(&path);
 #endif
+
 	return error;
 }
 
@@ -258,6 +259,7 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 	int reclen = ALIGN(offsetof(struct linux_dirent, d_name) + namlen + 2,
 		sizeof(long));
 
+
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct inode *inode;
 #endif
@@ -268,6 +270,7 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
+
 
 	d_ino = ino;
 	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
@@ -578,7 +581,6 @@ COMPAT_SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (f.file->f_inode->i_sb->s_magic == FUSE_SUPER_MAGIC) {
 		path_err = susfs_get_data_path(&path);
@@ -637,6 +639,7 @@ static int compat_filldir(struct dir_context *ctx, const char *name, int namlen,
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
+
 
 	d_ino = ino;
 	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
