@@ -123,7 +123,11 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 	struct fuse_file *ff;
 	int opcode = isdir ? FUSE_OPENDIR : FUSE_OPEN;
 
-	ff = fuse_file_alloc(fc);
+	if (file->private_data) {
+		ff = file->private_data;
+		file->private_data = NULL;
+	} else
+		ff = fuse_file_alloc(fc);
 	if (!ff)
 		return -ENOMEM;
 
@@ -215,6 +219,20 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 	if (err)
 		return err;
 
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+
+		fer = fuse_bpf_backing(inode, struct fuse_open_io,
+				       fuse_open_initialize,
+				       fuse_open_backing,
+				       fuse_open_finalize,
+				       inode, file, isdir);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	if (is_wb_truncate) {
 		inode_lock(inode);
 		fuse_set_nowrite(inode);
@@ -295,6 +313,17 @@ static int fuse_open(struct inode *inode, struct file *file)
 static int fuse_release(struct inode *inode, struct file *file)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
+
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_err_ret fer;
+
+	fer = fuse_bpf_backing(inode, struct fuse_release_in,
+		       fuse_release_initialize, fuse_release_backing,
+		       fuse_release_finalize,
+		       inode, file->private_data);
+	if (fer.ret)
+		return PTR_ERR(fer.result);
+#endif
 
 	/* see fuse_vma_close() for !writeback_cache case */
 	if (fc->writeback_cache)
@@ -414,6 +443,17 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 	struct fuse_flush_in inarg;
 	int err;
 
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_err_ret fer;
+
+	fer = fuse_bpf_backing(file->f_inode, struct fuse_flush_in,
+			       fuse_flush_initialize, fuse_flush_backing,
+			       fuse_flush_finalize,
+			       file, id);
+	if (fer.ret)
+		return PTR_ERR(fer.result);
+#endif
+
 	if (fuse_is_bad(inode))
 		return -EIO;
 
@@ -461,6 +501,17 @@ int fuse_fsync_common(struct file *file, loff_t start, loff_t end,
 	FUSE_ARGS(args);
 	struct fuse_fsync_in inarg;
 	int err;
+
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_err_ret fer;
+
+	fer = fuse_bpf_backing(inode, struct fuse_fsync_in,
+			       fuse_fsync_initialize, fuse_fsync_backing,
+			       fuse_fsync_finalize,
+			       file, start, end, datasync);
+	if (fer.ret)
+		return PTR_ERR(fer.result);
+#endif
 
 	if (fuse_is_bad(inode))
 		return -EIO;
@@ -955,6 +1006,21 @@ static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 		if (err)
 			return err;
 	}
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+
+		fer = fuse_bpf_backing(inode, struct fuse_file_read_iter_io,
+				       fuse_file_read_iter_initialize,
+				       fuse_file_read_iter_backing,
+				       fuse_file_read_iter_finalize,
+				       iocb, to);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	if (ff->passthrough.filp)
 		return fuse_passthrough_read_iter(iocb, to);
 	return generic_file_read_iter(iocb, to);
@@ -1206,6 +1272,20 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	ssize_t err;
 	loff_t endbyte = 0;
 	struct fuse_file *ff = file->private_data;
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+
+		fer = fuse_bpf_backing(inode, struct fuse_file_write_iter_io,
+				       fuse_file_write_iter_initialize,
+				       fuse_file_write_iter_backing,
+				       fuse_file_write_iter_finalize,
+				       iocb, from);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
 
 	if (ff->passthrough.filp)
 		return fuse_passthrough_write_iter(iocb, from);
@@ -1660,6 +1740,21 @@ int fuse_write_inode(struct inode *inode, struct writeback_control *wbc)
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_file *ff;
 	int err;
+
+#ifdef CONFIG_FUSE_BPF
+	/**
+	 * TODO - fully understand why this is necessary
+	 *
+	 * With fuse-bpf, fsstress fails if rename is enabled without this
+	 *
+	 * We are getting writes here on directory inodes, which do not have an
+	 * initialized file list so crash.
+	 *
+	 * The question is why we are getting those writes
+	 */
+	if (!S_ISREG(inode->i_mode))
+		return 0;
+#endif
 
 	ff = __fuse_write_file_get(fc, fi);
 	err = fuse_flush_times(inode, ff);
@@ -3024,6 +3119,18 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	int err;
 	bool lock_inode = !(mode & FALLOC_FL_KEEP_SIZE) ||
 			   (mode & FALLOC_FL_PUNCH_HOLE);
+
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_err_ret fer;
+
+	fer = fuse_bpf_backing(inode, struct fuse_fallocate_in,
+			       fuse_file_fallocate_initialize,
+			       fuse_file_fallocate_backing,
+			       fuse_file_fallocate_finalize,
+			       file, mode, offset, length);
+	if (fer.ret)
+		return PTR_ERR(fer.result);
+#endif
 
 	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE))
 		return -EOPNOTSUPP;
