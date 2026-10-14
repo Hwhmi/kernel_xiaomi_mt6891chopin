@@ -330,8 +330,10 @@ static void fuse_dentry_release(struct dentry *dentry)
 {
 	struct fuse_dentry *fd = dentry->d_fsdata;
 
+#ifdef CONFIG_FUSE_BPF
 	if (fd && fd->backing_path.dentry)
 		path_put(&fd->backing_path);
+#endif
 
 	kfree_rcu(fd, rcu);
 }
@@ -1732,9 +1734,9 @@ static int fuse_dir_release(struct inode *inode, struct file *file)
 static int fuse_dir_fsync(struct file *file, loff_t start, loff_t end,
 			  int datasync)
 {
+#ifdef CONFIG_FUSE_BPF
 	struct inode *inode = file->f_mapping->host;
 
-#ifdef CONFIG_FUSE_BPF
 	{
 		struct fuse_err_ret fer;
 
