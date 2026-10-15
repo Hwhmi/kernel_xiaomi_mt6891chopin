@@ -301,101 +301,6 @@ static int fuse_inode_set(struct inode *inode, void *_nodeidp)
 	return 0;
 }
 
-struct fuse_inode_identifier {
-	u64 nodeid;
-	struct inode *backing_inode;
-};
-
-static void fuse_fill_attr_from_inode(struct fuse_attr *attr,
-				      const struct inode *inode)
-{
-	*attr = (struct fuse_attr){
-		.ino		= inode->i_ino,
-		.size		= inode->i_size,
-		.blocks		= inode->i_blocks,
-		.atime		= inode->i_atime.tv_sec,
-		.mtime		= inode->i_mtime.tv_sec,
-		.ctime		= inode->i_ctime.tv_sec,
-		.atimensec	= inode->i_atime.tv_nsec,
-		.mtimensec	= inode->i_mtime.tv_nsec,
-		.ctimensec	= inode->i_ctime.tv_nsec,
-		.mode		= inode->i_mode,
-		.nlink		= inode->i_nlink,
-		.uid		= inode->i_uid.val,
-		.gid		= inode->i_gid.val,
-		.rdev		= inode->i_rdev,
-		.blksize	= (1 << inode->i_blkbits),
-	};
-}
-
-static int fuse_inode_backing_eq(struct inode *inode, void *_nodeidp)
-{
-	struct fuse_inode_identifier *fii =
-		(struct fuse_inode_identifier *) _nodeidp;
-	struct fuse_inode *fi = get_fuse_inode(inode);
-
-	return fii->nodeid == fi->nodeid
-#ifdef CONFIG_FUSE_BPF
-		&& fii->backing_inode == fi->backing_inode
-#endif
-		;
-}
-
-static int fuse_inode_backing_set(struct inode *inode, void *_nodeidp)
-{
-	struct fuse_inode_identifier *fii =
-		(struct fuse_inode_identifier *) _nodeidp;
-	struct fuse_inode *fi = get_fuse_inode(inode);
-
-	fi->nodeid = fii->nodeid;
-#ifdef CONFIG_FUSE_BPF
-	fi->backing_inode = fii->backing_inode;
-	if (fi->backing_inode)
-		ihold(fi->backing_inode);
-#endif
-
-	return 0;
-}
-
-struct inode *fuse_iget_backing(struct super_block *sb, u64 nodeid,
-				struct inode *backing_inode)
-{
-	struct inode *inode;
-	struct fuse_inode *fi;
-	struct fuse_conn *fc = get_fuse_conn_super(sb);
-	struct fuse_inode_identifier fii = {
-		.nodeid = nodeid,
-		.backing_inode = backing_inode,
-	};
-	struct fuse_attr attr;
-	unsigned long hash = (unsigned long) backing_inode;
-
-	if (nodeid)
-		hash = nodeid;
-
-	fuse_fill_attr_from_inode(&attr, backing_inode);
-	inode = iget5_locked(sb, hash, fuse_inode_backing_eq,
-			     fuse_inode_backing_set, &fii);
-	if (!inode)
-		return NULL;
-
-	if ((inode->i_state & I_NEW)) {
-		inode->i_flags |= S_NOATIME;
-		if (!fc->writeback_cache)
-			inode->i_flags |= S_NOCMTIME;
-		fuse_init_common(inode);
-		unlock_new_inode(inode);
-	}
-
-	fi = get_fuse_inode(inode);
-	fuse_init_inode(inode, &attr);
-	spin_lock(&fc->lock);
-	fi->nlookup++;
-	spin_unlock(&fc->lock);
-
-	return inode;
-}
-
 struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 			int generation, struct fuse_attr *attr,
 			u64 attr_valid, u64 attr_version)
@@ -507,6 +412,20 @@ static void fuse_put_super(struct super_block *sb)
 	mutex_unlock(&fuse_mutex);
 
 	fuse_conn_put(fc);
+}
+
+static void convert_fuse_statfs(struct kstatfs *stbuf, struct fuse_kstatfs *attr)
+{
+	stbuf->f_type    = FUSE_SUPER_MAGIC;
+	stbuf->f_bsize   = attr->bsize;
+	stbuf->f_frsize  = attr->frsize;
+	stbuf->f_blocks  = attr->blocks;
+	stbuf->f_bfree   = attr->bfree;
+	stbuf->f_bavail  = attr->bavail;
+	stbuf->f_files   = attr->files;
+	stbuf->f_ffree   = attr->ffree;
+	stbuf->f_namelen = attr->namelen;
+	/* fsid is left zero */
 }
 
 static int fuse_statfs(struct dentry *dentry, struct kstatfs *buf)
@@ -773,7 +692,7 @@ static struct dentry *fuse_get_dentry(struct super_block *sb,
 			goto out_err;
 
 		err = fuse_lookup_name(sb, handle->nodeid, &name, &outarg,
-				       NULL, &inode);
+				       &inode);
 		if (err && err != -ENOENT)
 			goto out_err;
 		if (err || !inode) {
@@ -874,7 +793,7 @@ static struct dentry *fuse_get_parent(struct dentry *child)
 		return ERR_PTR(-ESTALE);
 
 	err = fuse_lookup_name(child_inode->i_sb, get_node_id(child_inode),
-			       &name, &outarg, NULL, &inode);
+			       &name, &outarg, &inode);
 	if (err) {
 		if (err == -ENOENT)
 			return ERR_PTR(-ESTALE);
