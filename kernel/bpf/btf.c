@@ -3078,6 +3078,43 @@ int btf_find_spin_lock(const struct btf *btf, const struct btf_type *t)
 	return off;
 }
 
+/* find 'struct bpf_timer' in map value.
+ * return >= 0 offset if found
+ * and < 0 in case of error
+ */
+int btf_find_timer(const struct btf *btf, const struct btf_type *t)
+{
+	const struct btf_member *member;
+	u32 i, off = -ENOENT;
+
+	if (!__btf_type_is_struct(t))
+		return -EINVAL;
+
+	for_each_member(i, t, member) {
+		const struct btf_type *member_type = btf_type_by_id(btf,
+								    member->type);
+		if (!__btf_type_is_struct(member_type))
+			continue;
+		if (member_type->size != sizeof(struct bpf_timer))
+			continue;
+		if (strcmp(__btf_name_by_offset(btf, member_type->name_off),
+			   "bpf_timer"))
+			continue;
+		if (off != -ENOENT)
+			/* only one 'struct bpf_timer' is allowed */
+			return -E2BIG;
+		off = btf_member_bit_offset(t, member);
+		if (off % 8)
+			/* valid C code cannot generate such BTF */
+			return -EINVAL;
+		off /= 8;
+		if (off % __alignof__(struct bpf_timer))
+			/* valid struct bpf_timer will be 8 byte aligned */
+			return -EINVAL;
+	}
+	return off;
+}
+
 static void __btf_struct_show(const struct btf *btf, const struct btf_type *t,
 			      u32 type_id, void *data, u8 bits_offset,
 			      struct btf_show *show)

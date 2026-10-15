@@ -33,6 +33,7 @@ struct perf_event;
 struct bpf_prog;
 struct bpf_prog_aux;
 struct bpf_map;
+struct bpf_func_state;
 struct sock;
 struct seq_file;
 struct btf;
@@ -138,6 +139,12 @@ struct bpf_map_ops {
 	bool (*map_meta_equal)(const struct bpf_map *meta0,
 			       const struct bpf_map *meta1);
 
+	int (*map_set_for_each_callback_args)(struct bpf_verifier_env *env,
+					      struct bpf_func_state *caller,
+					      struct bpf_func_state *callee);
+	int (*map_for_each_callback)(struct bpf_map *map, void *callback_fn,
+				     void *callback_ctx, u64 flags);
+
 	/* BTF name and id of struct allocated by map_alloc */
 	const char * const map_btf_name;
 	int *map_btf_id;
@@ -161,6 +168,7 @@ struct bpf_map {
 	u32 max_entries;
 	u32 map_flags;
 	int spin_lock_off; /* >=0 valid offset, <0 error */
+	int timer_off; /* >=0 valid offset, <0 error */
 	u32 id;
 	int numa_node;
 	u32 btf_key_type_id;
@@ -190,6 +198,11 @@ static inline bool map_value_has_spin_lock(const struct bpf_map *map)
 	return map->spin_lock_off >= 0;
 }
 
+static inline bool map_value_has_timer(const struct bpf_map *map)
+{
+	return map->timer_off >= 0;
+}
+
 static inline void check_and_init_map_lock(struct bpf_map *map, void *dst)
 {
 	if (likely(!map_value_has_spin_lock(map)))
@@ -198,20 +211,50 @@ static inline void check_and_init_map_lock(struct bpf_map *map, void *dst)
 		(struct bpf_spin_lock){};
 }
 
-/* copy everything but bpf_spin_lock */
+static inline void check_and_init_map_value(struct bpf_map *map, void *dst)
+{
+	if (unlikely(map_value_has_spin_lock(map)))
+		memset(dst + map->spin_lock_off, 0, sizeof(struct bpf_spin_lock));
+	if (unlikely(map_value_has_timer(map)))
+		memset(dst + map->timer_off, 0, sizeof(struct bpf_timer));
+}
+
+/* copy everything but bpf_spin_lock and bpf_timer. There could be one of each. */
 static inline void copy_map_value(struct bpf_map *map, void *dst, void *src)
 {
-	if (unlikely(map_value_has_spin_lock(map))) {
-		u32 off = map->spin_lock_off;
+	u32 s_off = 0, s_sz = 0, t_off = 0, t_sz = 0;
 
-		memcpy(dst, src, off);
-		memcpy(dst + off + sizeof(struct bpf_spin_lock),
-		       src + off + sizeof(struct bpf_spin_lock),
-		       map->value_size - off - sizeof(struct bpf_spin_lock));
+	if (unlikely(map_value_has_spin_lock(map))) {
+		s_off = map->spin_lock_off;
+		s_sz = sizeof(struct bpf_spin_lock);
+	}
+	if (unlikely(map_value_has_timer(map))) {
+		t_off = map->timer_off;
+		t_sz = sizeof(struct bpf_timer);
+	}
+
+	if (unlikely(s_sz || t_sz)) {
+		if (s_off < t_off || !s_sz) {
+			swap(s_off, t_off);
+			swap(s_sz, t_sz);
+		}
+		memcpy(dst, src, t_off);
+		memcpy(dst + t_off + t_sz,
+		       src + t_off + t_sz,
+		       s_off - t_off - t_sz);
+		memcpy(dst + s_off + s_sz,
+		       src + s_off + s_sz,
+		       map->value_size - s_off - s_sz);
 	} else {
 		memcpy(dst, src, map->value_size);
 	}
 }
+
+void bpf_timer_cancel_and_free(void *timer);
+int map_set_for_each_callback_args(struct bpf_verifier_env *env,
+				   struct bpf_func_state *caller,
+				   struct bpf_func_state *callee);
+extern const struct bpf_func_proto bpf_for_each_map_elem_proto;
 void copy_map_value_locked(struct bpf_map *map, void *dst, void *src,
 			   bool lock_src);
 int bpf_obj_name_cpy(char *dst, const char *src, unsigned int size);
@@ -304,6 +347,11 @@ enum bpf_arg_type {
 	ARG_CONST_ALLOC_SIZE_OR_ZERO,	/* number of allocated bytes requested */
 	ARG_PTR_TO_BTF_ID_SOCK_COMMON,	/* pointer to in-kernel sock_common or bpf-mirrored bpf_sock */
 	ARG_PTR_TO_PERCPU_BTF_ID,	/* pointer to in-kernel percpu type */
+	ARG_PTR_TO_FUNC,	/* pointer to a bpf program function */
+	ARG_PTR_TO_CONST_STR,	/* pointer to a null terminated read-only string */
+	ARG_PTR_TO_TIMER,	/* pointer to bpf_timer */
+	ARG_PTR_TO_STACK,	/* pointer to stack */
+	ARG_PTR_TO_STACK_OR_NULL, /* pointer to stack or NULL */
 	__BPF_ARG_TYPE_MAX,
 };
 
@@ -420,6 +468,8 @@ enum bpf_reg_type {
 	PTR_TO_RDWR_BUF,	 /* reg points to a read/write buffer */
 	PTR_TO_RDWR_BUF_OR_NULL, /* reg points to a read/write buffer or NULL */
 	PTR_TO_PERCPU_BTF_ID,	 /* reg points to a percpu kernel variable */
+	PTR_TO_FUNC,		 /* reg points to a bpf program function */
+	PTR_TO_MAP_KEY,		 /* reg points to a map element key */
 };
 
 /* The information passed from prog-specific *_is_valid_access

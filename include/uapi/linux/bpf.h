@@ -106,6 +106,7 @@ enum bpf_cmd {
 	BPF_PROG_ATTACH,
 	BPF_PROG_DETACH,
 	BPF_PROG_TEST_RUN,
+	BPF_PROG_RUN = BPF_PROG_TEST_RUN,
 	BPF_PROG_GET_NEXT_ID,
 	BPF_MAP_GET_NEXT_ID,
 	BPF_PROG_GET_FD_BY_ID,
@@ -206,6 +207,7 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_EXT,
 	BPF_PROG_TYPE_LSM,
 	BPF_PROG_TYPE_SK_LOOKUP,
+	BPF_PROG_TYPE_SYSCALL, /* a program that can execute syscalls */
 	BPF_PROG_TYPE_FUSE,
 };
 
@@ -248,6 +250,9 @@ enum bpf_attach_type {
 	BPF_XDP_CPUMAP,
 	BPF_SK_LOOKUP,
 	BPF_XDP,
+	BPF_SK_SKB_VERDICT,
+	BPF_SK_REUSEPORT_SELECT,
+	BPF_SK_REUSEPORT_SELECT_OR_MIGRATE,
 	BPF_PERF_EVENT,
 	__MAX_BPF_ATTACH_TYPE
 };
@@ -396,11 +401,24 @@ enum bpf_link_type {
  *                   is struct/union.
  */
 #define BPF_PSEUDO_BTF_ID	3
+/* insn[0].src_reg:  BPF_PSEUDO_FUNC
+ * insn[0].imm:      insn offset to the func
+ * insn[1].imm:      0
+ * insn[0].off:      0
+ * insn[1].off:      0
+ * ldimm64 rewrite:  address of the function
+ * verifier type:    PTR_TO_FUNC.
+ */
+#define BPF_PSEUDO_FUNC		4
 
 /* when bpf_call->src_reg == BPF_PSEUDO_CALL, bpf_call->imm == pc-relative
  * offset to another bpf function
  */
 #define BPF_PSEUDO_CALL		1
+/* when bpf_call->src_reg == BPF_PSEUDO_KFUNC_CALL,
+ * bpf_call->imm == btf_id of a BTF_KIND_FUNC in the running kernel
+ */
+#define BPF_PSEUDO_KFUNC_CALL	2
 
 /* flags for BPF_MAP_UPDATE_ELEM command */
 enum {
@@ -4040,6 +4058,16 @@ union bpf_attr {
 	FN(ktime_get_coarse_ns),	\
 	FN(ima_inode_hash),		\
 	FN(sock_from_file),		\
+	FN(check_mtu),			\
+	FN(for_each_map_elem),		\
+	FN(snprintf),			\
+	FN(sys_bpf),			\
+	FN(btf_find_by_name_kind),	\
+	FN(sys_close),			\
+	FN(timer_init),			\
+	FN(timer_set_callback),		\
+	FN(timer_start),		\
+	FN(timer_cancel),		\
 	FN(get_func_ip),		\
 	FN(get_attach_cookie),		\
 	FN(task_pt_regs),		\
@@ -5135,6 +5163,22 @@ struct bpf_line_info {
 
 struct bpf_spin_lock {
 	__u32	val;
+};
+
+struct bpf_timer {
+	__u64 :64;
+	__u64 :64;
+} __attribute__((aligned(8)));
+
+/* bpf_check_mtu flags*/
+enum  bpf_check_mtu_flags {
+	BPF_MTU_CHK_SEGS  = (1U << 0),
+};
+
+enum bpf_check_mtu_ret {
+	BPF_MTU_CHK_RET_SUCCESS,      /* check and lookup successful */
+	BPF_MTU_CHK_RET_FRAG_NEEDED,  /* fragmentation required to fwd */
+	BPF_MTU_CHK_RET_SEGS_TOOBIG,  /* GSO re-segmentation needed to fwd */
 };
 
 struct bpf_sysctl {

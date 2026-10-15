@@ -159,6 +159,8 @@ struct bpf_reg_state {
 	enum bpf_reg_liveness live;
 	/* if (!precise && SCALAR_VALUE) min/max/tnum don't affect safety */
 	bool precise;
+	/* for PTR_TO_FUNC: subprog number this register points to */
+	u32 subprogno;
 };
 
 enum bpf_stack_slot_type {
@@ -202,6 +204,17 @@ struct bpf_func_state {
 	 * zero == main subprog
 	 */
 	u32 subprogno;
+	/* Async callback machinery.
+	 * 'async_entry_cnt' represents the number of times this function
+	 * entered async callbacks. It's a per-callback counter that
+	 * distinguishes states of different async callbacks, so that
+	 * verifier states from different async entries are not confused
+	 * with each other.
+	 * 'in_callback_fn' is true if this function state is the state of
+	 * an async callback function (timer callback or for_each callback).
+	 */
+	u32 async_entry_cnt;
+	bool in_callback_fn;
 
 	/* The following fields should be last. See copy_func_state() */
 	int acquired_refs;
@@ -420,6 +433,7 @@ struct bpf_subprog_info {
 	bool has_tail_call;
 	bool tail_call_reachable;
 	bool has_ld_abs;
+	bool is_async_cb;
 };
 
 /* single container for all structs

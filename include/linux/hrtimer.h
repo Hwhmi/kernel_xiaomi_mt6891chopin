@@ -33,8 +33,17 @@ enum hrtimer_mode {
 	HRTIMER_MODE_ABS = 0x0,		/* Time value is absolute */
 	HRTIMER_MODE_REL = 0x1,		/* Time value is relative to now */
 	HRTIMER_MODE_PINNED = 0x02,	/* Timer is bound to CPU */
+	HRTIMER_MODE_SOFT = 0x04,	/* Timer callback is executed in
+					 * softirq context (backport v5.9)
+					 */
 	HRTIMER_MODE_ABS_PINNED = 0x02,
 	HRTIMER_MODE_REL_PINNED = 0x03,
+
+	HRTIMER_MODE_ABS_SOFT = HRTIMER_MODE_ABS | HRTIMER_MODE_SOFT,
+	HRTIMER_MODE_REL_SOFT = HRTIMER_MODE_REL | HRTIMER_MODE_SOFT,
+
+	HRTIMER_MODE_ABS_PINNED_SOFT = HRTIMER_MODE_ABS_PINNED | HRTIMER_MODE_SOFT,
+	HRTIMER_MODE_REL_PINNED_SOFT = HRTIMER_MODE_REL_PINNED | HRTIMER_MODE_SOFT,
 };
 
 /*
@@ -74,6 +83,10 @@ enum hrtimer_restart {
 #define HRTIMER_STATE_ENQUEUED	0x01
 #define HRTIMER_PINNED_SHIFT	1
 #define HRTIMER_STATE_PINNED	(1 << HRTIMER_PINNED_SHIFT)
+/* Timer expired from the clock base queue and is pending execution in
+ * softirq context (HRTIMER_SOFTIRQ). Backport from v5.9.
+ */
+#define HRTIMER_STATE_SOFTPENDING 0x04
 
 /**
  * struct hrtimer - the basic hrtimer structure
@@ -100,6 +113,13 @@ struct hrtimer {
 	struct hrtimer_clock_base	*base;
 	u8				state;
 	u8				is_rel;
+	/* Softirq based hrtimer support (backport from v5.9):
+	 * 'is_soft' timers have their callback executed in softirq
+	 * context via HRTIMER_SOFTIRQ instead of hardirq context.
+	 * 'soft_next' chains such timers on the per-cpu pending list.
+	 */
+	u8				is_soft;
+	struct hrtimer			*soft_next;
 };
 
 /**

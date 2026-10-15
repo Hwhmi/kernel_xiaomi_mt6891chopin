@@ -799,6 +799,127 @@ static void htab_elem_free(struct bpf_htab *htab, struct htab_elem *l)
 	kfree(l);
 }
 
+/* Timer support (backport from v5.15) */
+static bool htab_has_extra_elems(struct bpf_htab *htab)
+{
+	return !htab_is_percpu(htab) && !htab_is_lru(htab);
+}
+
+static void check_and_free_timer(struct bpf_htab *htab, struct htab_elem *elem)
+{
+	if (unlikely(map_value_has_timer(&htab->map)))
+		bpf_timer_cancel_and_free(elem->key +
+					  round_up(htab->map.key_size, 8) +
+					  htab->map.timer_off);
+}
+
+static void htab_free_prealloced_timers(struct bpf_htab *htab)
+{
+	u32 num_entries = htab->map.max_entries;
+	int i;
+
+	if (likely(!map_value_has_timer(&htab->map)))
+		return;
+	if (htab_has_extra_elems(htab))
+		num_entries += num_possible_cpus();
+
+	for (i = 0; i < num_entries; i++) {
+		struct htab_elem *elem;
+
+		elem = get_htab_elem(htab, i);
+		bpf_timer_cancel_and_free(elem->key +
+					  round_up(htab->map.key_size, 8) +
+					  htab->map.timer_off);
+		cond_resched();
+	}
+}
+
+static void htab_free_malloced_timers(struct bpf_htab *htab)
+{
+	int i;
+
+	rcu_read_lock();
+	for (i = 0; i < htab->n_buckets; i++) {
+		struct hlist_nulls_head *head = select_bucket(htab, i);
+		struct hlist_nulls_node *n;
+		struct htab_elem *l;
+
+		hlist_nulls_for_each_entry(l, n, head, hash_node)
+			check_and_free_timer(htab, l);
+		cond_resched_rcu();
+	}
+	rcu_read_unlock();
+}
+
+static void htab_map_free_timers(struct bpf_map *map)
+{
+	struct bpf_htab *htab = container_of(map, struct bpf_htab, map);
+
+	if (likely(!map_value_has_timer(&htab->map)))
+		return;
+	if (!htab_is_prealloc(htab))
+		htab_free_malloced_timers(htab);
+	else
+		htab_free_prealloced_timers(htab);
+}
+
+static int bpf_for_each_hash_elem(struct bpf_map *map, void *callback_fn,
+				  void *callback_ctx, u64 flags)
+{
+	struct bpf_htab *htab = container_of(map, struct bpf_htab, map);
+	struct hlist_nulls_head *head;
+	struct hlist_nulls_node *n;
+	struct htab_elem *elem;
+	u32 roundup_key_size;
+	int i, num_elems = 0;
+	void __percpu *pptr;
+	struct bucket *b;
+	void *key, *val;
+	bool is_percpu;
+	u64 ret = 0;
+
+	if (flags != 0)
+		return -EINVAL;
+
+	is_percpu = htab_is_percpu(htab);
+
+	roundup_key_size = round_up(map->key_size, 8);
+	/* disable migration so percpu value prepared here will be the
+	 * same as the one seen by the bpf program with bpf_map_lookup_elem().
+	 */
+	if (is_percpu)
+		migrate_disable();
+	for (i = 0; i < htab->n_buckets; i++) {
+		b = &htab->buckets[i];
+		rcu_read_lock();
+		head = &b->head;
+		hlist_nulls_for_each_entry_rcu(elem, n, head, hash_node) {
+			key = elem->key;
+			if (is_percpu) {
+				/* current cpu value for percpu map */
+				pptr = htab_elem_get_ptr(elem, map->key_size);
+				val = this_cpu_ptr(pptr);
+			} else {
+				val = elem->key + roundup_key_size;
+			}
+			num_elems++;
+			ret = BPF_CAST_CALL(callback_fn)((u64)(long)map,
+					(u64)(long)key, (u64)(long)val,
+					(u64)(long)callback_ctx, 0);
+			/* return value: 0 - continue, 1 - stop and return */
+			if (ret) {
+				rcu_read_unlock();
+				goto out;
+			}
+		}
+		rcu_read_unlock();
+	}
+out:
+	if (is_percpu)
+		migrate_enable();
+	return num_elems;
+}
+
 static void htab_elem_free_rcu(struct rcu_head *head)
 {
 	struct htab_elem *l = container_of(head, struct htab_elem, rcu);
@@ -821,6 +942,11 @@ static void htab_put_fd_value(struct bpf_htab *htab, struct htab_elem *l)
 static void free_htab_elem(struct bpf_htab *htab, struct htab_elem *l)
 {
 	htab_put_fd_value(htab, l);
+
+	/* Free any bpf_timer embedded in the value before the element goes
+	 * back to the free list / gets freed.
+	 */
+	check_and_free_timer(htab, l);
 
 	if (htab_is_prealloc(htab)) {
 		__pcpu_freelist_push(&htab->freelist, &l->fnode);
@@ -1890,6 +2016,9 @@ const struct bpf_map_ops htab_map_ops = {
 	.map_delete_elem = htab_map_delete_elem,
 	.map_gen_lookup = htab_map_gen_lookup,
 	.map_seq_show_elem = htab_map_seq_show_elem,
+	.map_release_uref = htab_map_free_timers,
+	.map_set_for_each_callback_args = map_set_for_each_callback_args,
+	.map_for_each_callback = bpf_for_each_hash_elem,
 	BATCH_OPS(htab),
 	.map_btf_name = "bpf_htab",
 	.map_btf_id = &htab_map_btf_id,
@@ -1909,6 +2038,9 @@ const struct bpf_map_ops htab_lru_map_ops = {
 	.map_delete_elem = htab_lru_map_delete_elem,
 	.map_gen_lookup = htab_lru_map_gen_lookup,
 	.map_seq_show_elem = htab_map_seq_show_elem,
+	.map_release_uref = htab_map_free_timers,
+	.map_set_for_each_callback_args = map_set_for_each_callback_args,
+	.map_for_each_callback = bpf_for_each_hash_elem,
 	BATCH_OPS(htab_lru),
 	.map_btf_name = "bpf_htab",
 	.map_btf_id = &htab_lru_map_btf_id,
