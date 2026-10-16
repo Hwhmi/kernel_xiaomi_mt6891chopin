@@ -3382,7 +3382,7 @@ int printk_deferred(const char *fmt, ...)
  * This enforces a rate limit: not more than 10 kernel messages
  * every 5s to make a denial-of-service attack impossible.
  */
-DEFINE_RATELIMIT_STATE(printk_ratelimit_state, 5 * HZ, 10);
+DEFINE_RATELIMIT_STATE(printk_ratelimit_state, 5 * HZ, 10000);
 
 int __printk_ratelimit(const char *func)
 {
