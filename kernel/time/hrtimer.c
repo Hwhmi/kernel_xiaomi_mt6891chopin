@@ -1336,6 +1336,41 @@ static void hrtimer_dequeue_soft(struct hrtimer_cpu_base *cpu_base,
 	}
 }
 
+/* Softirq based hrtimer support (backport from v5.9).
+ *
+ * Timers armed with HRTIMER_MODE_SOFT are dequeued from their clock base
+ * when they expire and are chained onto this per-cpu list. Their callback
+ * is then invoked from HRTIMER_SOFTIRQ (see hrtimer_run_softirq()) instead
+ * of hard interrupt context.
+ */
+static DEFINE_PER_CPU(struct hrtimer *, soft_hrtimer_pending);
+
+static void hrtimer_enqueue_soft(struct hrtimer_cpu_base *cpu_base,
+				 struct hrtimer *timer)
+{
+	lockdep_assert_held(&cpu_base->lock);
+
+	timer->soft_next = __this_cpu_read(soft_hrtimer_pending);
+	__this_cpu_write(soft_hrtimer_pending, timer);
+}
+
+static void hrtimer_dequeue_soft(struct hrtimer_cpu_base *cpu_base,
+				 struct hrtimer *timer)
+{
+	struct hrtimer **pp, *t;
+
+	lockdep_assert_held(&cpu_base->lock);
+
+	for (pp = this_cpu_ptr(&soft_hrtimer_pending);
+	     (t = *pp) != NULL; pp = &t->soft_next) {
+		if (t == timer) {
+			*pp = t->soft_next;
+			timer->soft_next = NULL;
+			return;
+		}
+	}
+}
+
 static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 			  struct hrtimer_clock_base *base,
 			  struct hrtimer *timer, ktime_t *now)
@@ -1345,6 +1380,18 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	unsigned long long ts;
 
 	lockdep_assert_held(&cpu_base->lock);
+
+	if (timer->is_soft) {
+		/* Do not run the callback from hardirq context. Move the
+		 * timer to the softirq pending list and let
+		 * hrtimer_run_softirq() invoke it.
+		 */
+		debug_deactivate(timer);
+		__remove_hrtimer(timer, base, HRTIMER_STATE_SOFTPENDING, 0);
+		hrtimer_enqueue_soft(cpu_base, timer);
+		raise_softirq_irqoff(HRTIMER_SOFTIRQ);
+		return;
+	}
 
 	if (timer->is_soft) {
 		/* Do not run the callback from hardirq context. Move the
@@ -1418,6 +1465,59 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 
 	WARN_ON_ONCE(cpu_base->running != timer);
 	cpu_base->running = NULL;
+}
+
+/* Runs the callbacks of expired HRTIMER_MODE_SOFT timers. The timers have
+ * already been dequeued from their clock base by __run_hrtimer(); here we
+ * only need to invoke them with interrupts enabled and the base lock
+ * dropped, mirroring upstream v5.9 hrtimer_run_softirq().
+ */
+static void hrtimer_run_softirq(struct softirq_action *h)
+{
+	struct hrtimer_cpu_base *cpu_base = this_cpu_ptr(&hrtimer_bases);
+	struct hrtimer *timer, *next;
+	unsigned long flags;
+	enum hrtimer_restart (*fn)(struct hrtimer *);
+	int restart;
+
+	raw_spin_lock_irqsave(&cpu_base->lock, flags);
+
+	timer = __this_cpu_read(soft_hrtimer_pending);
+	__this_cpu_write(soft_hrtimer_pending, NULL);
+
+	while (timer) {
+		struct hrtimer_clock_base *base = timer->base;
+
+		next = timer->soft_next;
+		timer->soft_next = NULL;
+
+		debug_deactivate(timer);
+		cpu_base->running = timer;
+
+		raw_write_seqcount_barrier(&cpu_base->seq);
+
+		/* The timer is not on any queue anymore */
+		timer->state &= HRTIMER_STATE_PINNED;
+
+		fn = timer->function;
+
+		raw_spin_unlock_irqrestore(&cpu_base->lock, flags);
+		restart = fn(timer);
+		raw_spin_lock_irqsave(&cpu_base->lock, flags);
+
+		if (restart != HRTIMER_NORESTART &&
+		    !(timer->state & HRTIMER_STATE_ENQUEUED))
+			enqueue_hrtimer(timer, base);
+
+		raw_write_seqcount_barrier(&cpu_base->seq);
+
+		WARN_ON_ONCE(cpu_base->running != timer);
+		cpu_base->running = NULL;
+
+		timer = next;
+	}
+
+	raw_spin_unlock_irqrestore(&cpu_base->lock, flags);
 }
 
 /* Runs the callbacks of expired HRTIMER_MODE_SOFT timers. The timers have
