@@ -3096,11 +3096,11 @@ static void __mt_gpufreq_init_table(void)
 
 	/* determine max_opp/min_opp... by segment */
 	if (segment_id == MT6891_SEGMENT)
-		g_segment_max_opp_idx = 5; //854MHz
+		g_segment_max_opp_idx = 0; //886MHz
 	else if (segment_id == MT6893_SEGMENT)
 		g_segment_max_opp_idx = 0; // 886MHz
 
-	g_segment_min_opp_idx = NUM_OF_OPP_IDX - 1;
+	g_segment_min_opp_idx = NUM_OF_OPP_IDX - 30;
 
 	g_opp_table = kzalloc((NUM_OF_OPP_IDX)*sizeof(*opp_table), GFP_KERNEL);
 
