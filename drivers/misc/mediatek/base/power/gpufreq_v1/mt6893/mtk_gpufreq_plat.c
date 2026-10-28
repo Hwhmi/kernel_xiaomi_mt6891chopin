@@ -3100,7 +3100,12 @@ static void __mt_gpufreq_init_table(void)
 	else if (segment_id == MT6893_SEGMENT)
 		g_segment_max_opp_idx = 0; // 886MHz
 
-	g_segment_min_opp_idx = NUM_OF_OPP_IDX - 30;
+	/* Allow the full 532MHz..886MHz DVFS range (idx 0..31).
+	 * Indices 32..40 (512MHz and below) remain disabled.
+	 * NOTE: 31 is an absolute index into g_opp_table_segment_*; update it
+	 * if the OPP table is trimmed.
+	 */
+	g_segment_min_opp_idx = 31; /* 532MHz */
 
 	g_opp_table = kzalloc((NUM_OF_OPP_IDX)*sizeof(*opp_table), GFP_KERNEL);
 

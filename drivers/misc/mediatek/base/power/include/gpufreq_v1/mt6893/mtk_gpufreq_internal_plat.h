@@ -349,7 +349,7 @@ unsigned int g_ptpod_opp_idx_table_segment[] = {
  **************************************************/
 /* default opp */
 struct opp_table_info g_opp_table_segment_1[] = {
-	GPUOP(886000, 82500, 82500, POSDIV_POWER_4, 1875), /* 0 sign off */
+	GPUOP(886000, 83125, 83125, POSDIV_POWER_4, 1875), /* 0 sign off */
 	GPUOP(879000, 79375, 79375, POSDIV_POWER_4, 1875), /* 1 */
 	GPUOP(873000, 78750, 78750, POSDIV_POWER_4, 1875), /* 2 */
 	GPUOP(867000, 78125, 78125, POSDIV_POWER_4, 1875), /* 3 */
@@ -394,7 +394,7 @@ struct opp_table_info g_opp_table_segment_1[] = {
 
 /* EFUSE 0x11C107B0[2:0] = 3'b010 */
 struct opp_table_info g_opp_table_segment_2[] = {
-	GPUOP(886000, 81875, 81875, POSDIV_POWER_4, 1875), /* 0 sign off */
+	GPUOP(886000, 82500, 82500, POSDIV_POWER_4, 1875), /* 0 sign off */
 	GPUOP(879000, 78750, 78750, POSDIV_POWER_4, 1875), /* 1 */
 	GPUOP(873000, 78750, 78750, POSDIV_POWER_4, 1875), /* 2 */
 	GPUOP(867000, 78125, 78125, POSDIV_POWER_4, 1875), /* 3 */

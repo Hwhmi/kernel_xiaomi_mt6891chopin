@@ -767,6 +767,15 @@ static struct sugov_tunables *sugov_tunables_alloc(struct sugov_policy *sg_polic
 
 	tunables = kzalloc(sizeof(*tunables), GFP_KERNEL);
 	if (tunables) {
+		/*
++		 * chopin: frame pacing tuning
++		 *   up   500us  - ramp up as soon as load appears
++		 *   down 8000us - ~8ms (one frame @120Hz); avoid mid-frame
++		 *                 downclock causing freq bounce
++		 * Was: both = transition_delay (~1000us, symmetric).
++		 */
++		tunables->up_rate_limit_us = 500;
++		tunables->down_rate_limit_us = 8000;
 		gov_attr_set_init(&tunables->attr_set, &sg_policy->tunables_hook);
 		if (!have_governor_per_policy())
 			global_tunables = tunables;
@@ -821,9 +830,6 @@ static int sugov_init(struct cpufreq_policy *policy)
 		ret = -ENOMEM;
 		goto stop_kthread;
 	}
-
-	tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
-	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
