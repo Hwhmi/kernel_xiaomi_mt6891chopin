@@ -865,11 +865,6 @@ static void __show_smap(struct seq_file *m, const struct mem_size_stats *mss)
 	seq_printf(m,
 		   "Rss:            %8lu kB\n"
 		   "Pss:            %8lu kB\n"
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
-	if (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
-		return 0;
-#endif
-
 		   "Shared_Clean:   %8lu kB\n"
 		   "Shared_Dirty:   %8lu kB\n"
 		   "Private_Clean:  %8lu kB\n"
@@ -906,6 +901,11 @@ static int show_smap(struct seq_file *m, void *v)
 {
 	struct vm_area_struct *vma = v;
 	struct mem_size_stats mss;
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+	if (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+		return 0;
+#endif
 
 	memset(&mss, 0, sizeof(mss));
 
