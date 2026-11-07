@@ -2819,9 +2819,17 @@ static void binder_free_transaction(struct binder_transaction *t)
 
 	if (target_proc) {
 		binder_inner_proc_lock(target_proc);
-		target_proc->outstanding_txns--;
-		if (target_proc->outstanding_txns < 0)
-			pr_warn("%s: Unexpected outstanding_txns %d\n",
+		/*
+		 * Transactions freed before reaching binder_proc_transaction()
+		 * were never counted, so an unconditional decrement drives this
+		 * counter negative.  Clamp at zero: a negative value makes
+		 * binder_txns_pending_ilocked() and the freezer misjudge pending
+		 * work, and the warning floods dmesg on every freed txn.
+		 */
+		if (target_proc->outstanding_txns > 0)
+			target_proc->outstanding_txns--;
+		else
+			pr_warn_ratelimited("%s: Unexpected outstanding_txns %d\n",
 				__func__, target_proc->outstanding_txns);
 		if (!target_proc->outstanding_txns && target_proc->is_frozen)
 			wake_up_interruptible_all(&target_proc->freeze_wait);
@@ -5627,7 +5635,8 @@ static int binder_thread_release(struct binder_proc *proc,
 			     (t->to_thread == thread) ? "in" : "out");
 
 		if (t->to_thread == thread) {
-			thread->proc->outstanding_txns--;
+			if (thread->proc->outstanding_txns > 0)
+				thread->proc->outstanding_txns--;
 			t->to_proc = NULL;
 			t->to_thread = NULL;
 			if (t->buffer) {

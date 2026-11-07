@@ -468,7 +468,15 @@ static struct binder_buffer *binder_alloc_new_buf_locked(
 	size = max(size, sizeof(void *));
 
 #ifdef CONFIG_ANDROID_VENDOR_HOOKS
-	trace_android_vh_binder_alloc_new_buf_locked(size, alloc, is_async);
+	/*
+	 * HyperOS millet registers mi_binder_alloc_new_buf_locked() here and
+	 * its mi_binder_overflow_hook() reads binder_alloc fields using
+	 * 4.14-era offsets.  After the 5.15 binder backport those offsets are
+	 * wrong, and the callback dereferences a truncated wild pointer in
+	 * binder_sendmsg() -> fatal exception in system_server.  Disable only
+	 * this hook; the other vendor hooks remain active.
+	 */
+	/* trace_android_vh_binder_alloc_new_buf_locked(size, alloc, is_async); */
 #endif
 
 	if (is_async && alloc->free_async_space < size) {
