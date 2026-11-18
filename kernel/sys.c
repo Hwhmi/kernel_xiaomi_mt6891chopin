@@ -193,6 +193,10 @@ out:
 	return error;
 }
 
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+extern bool susfs_is_priority_uid_filtered(uid_t uid);
+#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+
 SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 {
 	struct task_struct *g, *p;
@@ -238,6 +242,10 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 		if (!who)
 			uid = cred->uid;
 		else if (!uid_eq(uid, cred->uid)) {
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+			if (cred->uid.val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
+				goto out_unlock;
+#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 			user = find_user(uid);
 			if (!user)
 				goto out_unlock;	/* No processes for this user */
@@ -306,6 +314,10 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 		if (!who)
 			uid = cred->uid;
 		else if (!uid_eq(uid, cred->uid)) {
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+			if (cred->uid.val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
+				goto out_unlock;
+#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 			user = find_user(uid);
 			if (!user)
 				goto out_unlock;	/* No processes for this user */
@@ -602,6 +614,10 @@ error:
 extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
 #endif
 
+#ifdef CONFIG_KSU_SUSFS
+extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
+#endif
+
 SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 {
 	struct user_namespace *ns = current_user_ns();
@@ -618,6 +634,10 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 	if (ksu_handle_setresuid(ruid, euid, suid)) {
 		pr_info("Something wrong with ksu_handle_setresuid()\\n");
 	}
+#endif
+#ifdef CONFIG_KSU_SUSFS
+	if (ksu_handle_setresuid(ruid, euid, suid))
+		pr_info("Something wrong with ksu_handle_setresuid()\n");
 #endif
 	if ((ruid != (uid_t) -1) && !uid_valid(kruid))
 		return -EINVAL;
@@ -1193,8 +1213,11 @@ static int override_release(char __user *release, size_t len)
 	}
 	return ret;
 }
-#ifdef CONFIG_KSU_MANUAL_HOOK_SPOOF_UNAME
-#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+#include <linux/jump_label.h>
+extern struct static_key_false susfs_is_uname_spoof_buffer_set;
+extern void susfs_spoof_uname(struct new_utsname *tmp);
+#endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 
 SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 {
@@ -1216,8 +1239,10 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
-#ifdef CONFIG_KSU_MANUAL_HOOK_SPOOF_UNAME
-#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	if (static_branch_likely(&susfs_is_uname_spoof_buffer_set))
+		susfs_spoof_uname(&tmp);
+#endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
     for (i = 0; i < ARRAY_SIZE(fake_comm); i++) {
 		if (!strncmp(comm, fake_comm[i].name, fake_comm[i].len)) {
 			strscpy(tmp.release, "5.10.260",

@@ -282,6 +282,10 @@ static DEFINE_MUTEX(reboot_mutex);
 extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
 #endif
 
+#ifdef CONFIG_KSU_SUSFS
+extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
+#endif
+
 SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		void __user *, arg)
 {
@@ -290,6 +294,10 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	int ret = 0;
 
 #ifdef CONFIG_KSU_MANUAL_HOOK
+	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
+#endif
+#ifdef CONFIG_KSU_SUSFS
+	/* 必须在 LINUX_REBOOT_MAGIC* 校验之前：KSU 用的是自己的 magic 对 */
 	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
 #endif
 	/* We only trust the superuser with rebooting the system. */
