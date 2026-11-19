@@ -3096,11 +3096,11 @@ static void __mt_gpufreq_init_table(void)
 
 	/* determine max_opp/min_opp... by segment */
 	if (segment_id == MT6891_SEGMENT)
-		g_segment_max_opp_idx = 0; //886MHz
+		g_segment_max_opp_idx = 8; // 836MHz, MT6891 sign-off OPP
 	else if (segment_id == MT6893_SEGMENT)
 		g_segment_max_opp_idx = 0; // 886MHz
 
-	g_segment_min_opp_idx = NUM_OF_OPP_IDX - 30; /* 11 -> 805MHz, vendor default */
+	g_segment_min_opp_idx = NUM_OF_OPP_IDX - 10; /* 31 -> 532MHz floor */
 
 	g_opp_table = kzalloc((NUM_OF_OPP_IDX)*sizeof(*opp_table), GFP_KERNEL);
 
@@ -3241,6 +3241,13 @@ static void __mt_gpufreq_init_volt_by_freq(void)
 			}
 		}
 	}
+
+	/*
+	 * Never start above the segment's own max OPP.  Preloader may leave
+	 * the GPU at the 886MHz sign-off point, which MT6891 is not binned for.
+	 */
+	if (idx < g_segment_max_opp_idx)
+		idx = g_segment_max_opp_idx;
 
 	g_cur_opp_idx = idx;
 	g_cur_opp_freq = __mt_gpufreq_get_cur_freq();
