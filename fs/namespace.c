@@ -154,12 +154,30 @@ static int mnt_alloc_group_id(struct mount *mnt)
 {
 	int res;
 
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	if (susfs_is_current_ksu_domain()) {
+		if (!ida_pre_get(&mnt_group_ida, GFP_KERNEL))
+			return -ENOMEM;
+		res = ida_get_new_above(&mnt_group_ida,
+					DEFAULT_KSU_MNT_GROUP_ID,
+					&mnt->mnt_group_id);
+		goto bypass_orig_flow;
+	}
+
+	if (!ida_pre_get(&mnt_group_ida, GFP_KERNEL))
+		return -ENOMEM;
+	res = ida_get_new_above(&mnt_group_ida,
+				mnt_group_start,
+				&mnt->mnt_group_id);
+bypass_orig_flow:
+#else
 	if (!ida_pre_get(&mnt_group_ida, GFP_KERNEL))
 		return -ENOMEM;
 
 	res = ida_get_new_above(&mnt_group_ida,
 				mnt_group_start,
 				&mnt->mnt_group_id);
+#endif
 	if (!res)
 		mnt_group_start = mnt->mnt_group_id + 1;
 
@@ -3256,6 +3274,9 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
 	copy_flags = CL_COPY_UNBINDABLE | CL_EXPIRE;
 	if (user_ns != ns->user_ns)
 		copy_flags |= CL_SHARED_TO_SLAVE | CL_UNPRIVILEGED;
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	copy_flags |= CL_COPY_MNT_NS;
+#endif
 	new = copy_tree(old, old->mnt.mnt_root, copy_flags);
 	if (IS_ERR(new)) {
 		namespace_unlock();
